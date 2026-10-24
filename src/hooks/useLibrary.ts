@@ -1,0 +1,249 @@
+import { useEffect, useState, useCallback } from 'react';
+import { Song, Album, Artist, Playlist } from '../types';
+import { db, isDemoItem } from '../services/indexedDB';
+
+export function useLibrary() {
+  const [favoriteSongs, setFavoriteSongs] = useState<Song[]>([]);
+  const [savedAlbums, setSavedAlbums] = useState<Album[]>([]);
+  const [savedArtists, setSavedArtists] = useState<Artist[]>([]);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [recentlyPlayed, setRecentlyPlayed] = useState<Song[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const loadLibrary = useCallback(async () => {
+    try {
+      const [favs, albs, arts, pls, recents] = await Promise.all([
+        db.getFavorites(),
+        db.getSavedAlbums(),
+        db.getSavedArtists(),
+        db.getPlaylists(),
+        db.getRecentlyPlayed(30),
+      ]);
+
+      let localFavs = favs.filter((s) => !isDemoItem(s));
+      let localPls = pls.filter((p) => !isDemoItem(p)).map((p) => ({
+        ...p,
+        tracks: (p.tracks || []).filter((t) => !isDemoItem(t)),
+        trackCount: (p.tracks || []).filter((t) => !isDemoItem(t)).length,
+      }));
+
+      setFavoriteSongs(localFavs);
+      setSavedAlbums(albs.filter((a) => !isDemoItem(a)));
+      setSavedArtists(arts.filter((a) => !isDemoItem(a)));
+      setRecentlyPlayed(recents.filter((s) => !isDemoItem(s)));
+      setPlaylists(localPls.filter((p) => p.id !== 'offline-backup-playlist'));
+    } catch (e) {
+      console.error('Error reading library from IndexedDB:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadLibrary();
+
+    const handleDownloadsChanged = () => {
+      loadLibrary();
+    };
+
+    window.addEventListener('celestial-downloads-changed', handleDownloadsChanged);
+    return () => {
+      window.removeEventListener('celestial-downloads-changed', handleDownloadsChanged);
+    };
+  }, [loadLibrary]);
+
+  // Favorites
+  const toggleFavorite = useCallback(async (song: Song) => {
+    const isFav = favoriteSongs.some((s) => s.id === song.id);
+    if (isFav) {
+      await db.removeFavorite(song.id);
+      setFavoriteSongs((prev) => prev.filter((s) => s.id !== song.id));
+    } else {
+      await db.addFavorite(song);
+      setFavoriteSongs((prev) => [song, ...prev]);
+    }
+  }, [favoriteSongs]);
+
+  const isFavorite = useCallback(
+    (songId: string) => favoriteSongs.some((s) => s.id === songId),
+    [favoriteSongs]
+  );
+
+  // Albums
+  const toggleSaveAlbum = useCallback(async (album: Album) => {
+    const isSaved = savedAlbums.some((a) => a.id === album.id);
+    if (isSaved) {
+      await db.removeSavedAlbum(album.id);
+      setSavedAlbums((prev) => prev.filter((a) => a.id !== album.id));
+    } else {
+      await db.saveAlbum(album);
+      setSavedAlbums((prev) => [album, ...prev]);
+    }
+  }, [savedAlbums]);
+
+  const isAlbumSaved = useCallback(
+    (albumId: string) => savedAlbums.some((a) => a.id === albumId),
+    [savedAlbums]
+  );
+
+  // Artists
+  const toggleSaveArtist = useCallback(async (artist: Artist) => {
+    const isSaved = savedArtists.some((a) => a.id === artist.id);
+    if (isSaved) {
+      await db.removeSavedArtist(artist.id);
+      setSavedArtists((prev) => prev.filter((a) => a.id !== artist.id));
+    } else {
+      await db.saveArtist(artist);
+      setSavedArtists((prev) => [artist, ...prev]);
+    }
+  }, [savedArtists]);
+
+  const isArtistSaved = useCallback(
+    (artistId: string) => savedArtists.some((a) => a.id === artistId),
+    [savedArtists]
+  );
+
+  // Playlists
+  const createPlaylist = useCallback(async (title: string, description?: string) => {
+    const newPlaylist: Playlist = {
+      id: `playlist-${Date.now()}`,
+      title: title.trim(),
+      description: description?.trim() || '',
+      artworkUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&q=80',
+      collageArtworks: [],
+      trackCount: 0,
+      totalDuration: 0,
+      tracks: [],
+      isCustom: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await db.savePlaylist(newPlaylist);
+    setPlaylists((prev) => [newPlaylist, ...prev]);
+    return newPlaylist;
+  }, []);
+
+  const updatePlaylist = useCallback(async (updated: Playlist) => {
+    await db.savePlaylist(updated);
+    setPlaylists((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  }, []);
+
+  const deletePlaylist = useCallback(async (playlistId: string) => {
+    await db.deletePlaylist(playlistId);
+    setPlaylists((prev) => prev.filter((p) => p.id !== playlistId));
+  }, []);
+
+  const addSongToPlaylist = useCallback(async (playlistId: string, song: Song) => {
+    const target = playlists.find((p) => p.id === playlistId);
+    if (!target) return;
+
+    if (target.tracks.some((s) => s.id === song.id)) {
+      return; // Already in playlist
+    }
+
+    const updatedTracks = [...target.tracks, song];
+    const totalDuration = updatedTracks.reduce((acc, cur) => acc + cur.duration, 0);
+    const updatedCollage = Array.from(new Set(updatedTracks.map((t) => t.artworkUrl))).slice(0, 4);
+
+    const updated: Playlist = {
+      ...target,
+      tracks: updatedTracks,
+      trackCount: updatedTracks.length,
+      totalDuration,
+      collageArtworks: updatedCollage,
+      artworkUrl: target.artworkUrl || song.artworkUrl,
+      updatedAt: Date.now(),
+    };
+
+    await db.savePlaylist(updated);
+    setPlaylists((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  }, [playlists]);
+
+  const removeSongFromPlaylist = useCallback(async (playlistId: string, songId: string) => {
+    const target = playlists.find((p) => p.id === playlistId);
+    if (!target) return;
+
+    const updatedTracks = target.tracks.filter((t) => t.id !== songId);
+    const totalDuration = updatedTracks.reduce((acc, cur) => acc + cur.duration, 0);
+    const updatedCollage = Array.from(new Set(updatedTracks.map((t) => t.artworkUrl))).slice(0, 4);
+
+    const updated: Playlist = {
+      ...target,
+      tracks: updatedTracks,
+      trackCount: updatedTracks.length,
+      totalDuration,
+      collageArtworks: updatedCollage,
+      updatedAt: Date.now(),
+    };
+
+    await db.savePlaylist(updated);
+    setPlaylists((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  }, [playlists]);
+
+  const reorderPlaylistTracks = useCallback(async (playlistId: string, fromIndex: number, toIndex: number) => {
+    const target = playlists.find((p) => p.id === playlistId);
+    if (!target) return;
+
+    const newTracks = [...target.tracks];
+    const [moved] = newTracks.splice(fromIndex, 1);
+    newTracks.splice(toIndex, 0, moved);
+
+    const updated: Playlist = {
+      ...target,
+      tracks: newTracks,
+      updatedAt: Date.now(),
+    };
+
+    await db.savePlaylist(updated);
+    setPlaylists((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  }, [playlists]);
+
+  const importPlaylist = useCallback(async (playlist: Playlist) => {
+    await db.savePlaylist(playlist);
+    setPlaylists((prev) => [playlist, ...prev.filter((p) => p.id !== playlist.id)]);
+    return playlist;
+  }, []);
+
+  const clearFavorites = useCallback(async () => {
+    for (const song of favoriteSongs) {
+      await db.removeFavorite(song.id);
+    }
+    setFavoriteSongs([]);
+  }, [favoriteSongs]);
+
+  const clearRecentlyPlayed = useCallback(async () => {
+    await db.clearRecentlyPlayed();
+    setRecentlyPlayed([]);
+  }, []);
+
+  const refreshRecents = useCallback(async () => {
+    const recents = await db.getRecentlyPlayed(30);
+    setRecentlyPlayed(recents);
+  }, []);
+
+  return {
+    favoriteSongs,
+    savedAlbums,
+    savedArtists,
+    playlists,
+    recentlyPlayed,
+    isLoading,
+    toggleFavorite,
+    isFavorite,
+    toggleSaveAlbum,
+    isAlbumSaved,
+    toggleSaveArtist,
+    isArtistSaved,
+    createPlaylist,
+    importPlaylist,
+    clearFavorites,
+    updatePlaylist,
+    deletePlaylist,
+    addSongToPlaylist,
+    removeSongFromPlaylist,
+    reorderPlaylistTracks,
+    clearRecentlyPlayed,
+    refreshRecents,
+    reloadLibrary: loadLibrary,
+  };
+}

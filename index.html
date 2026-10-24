@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      // Suppress harmless Vite HMR WebSocket connection noise in dev iframe
+      window.addEventListener('unhandledrejection', function(event) {
+        var msg = event.reason ? (event.reason.message || String(event.reason)) : '';
+        if (msg.includes('WebSocket') || msg.includes('vite')) {
+          event.preventDefault();
+        }
+      });
+      (function() {
+        var suppress = function(arg) {
+          var str = typeof arg === 'string' ? arg : (arg && (arg.message || arg.stack || '' + arg)) || '';
+          return str.includes('[vite]') || str.includes('WebSocket') || str.includes('vite-hmr');
+        };
+        ['error', 'warn', 'debug', 'log'].forEach(function(m) {
+          var orig = console[m];
+          if (orig) {
+            console[m] = function() {
+              for (var i = 0; i < arguments.length; i++) {
+                if (suppress(arguments[i])) return;
+              }
+              return orig.apply(this, arguments);
+            };
+          }
+        });
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <title>Celestial Music</title>
+    <meta name="description" content="A production-quality, mobile-first, ad-free music streaming web player and PWA with an Apple-inspired aesthetic." />
+    <meta property="og:title" content="Celestial Music" />
+    <meta property="og:description" content="A production-quality, mobile-first, ad-free music streaming web player and PWA with an Apple-inspired aesthetic." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#0a0a0c" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Celestial Music" />
+    <meta name="application-name" content="Celestial Music" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <style>
+      /* Complete scrollbar elimination for all browsers */
+      html, body, #root, * {
+        scrollbar-width: none !important;
+        -ms-overflow-style: none !important;
+      }
+      ::-webkit-scrollbar,
+      *::-webkit-scrollbar,
+      html::-webkit-scrollbar,
+      body::-webkit-scrollbar {
+        display: none !important;
+        width: 0px !important;
+        height: 0px !important;
+        background: transparent !important;
+        -webkit-appearance: none !important;
+      }
+    </style>
+  </head>
+  <body class="bg-[#000000] text-white selection:bg-white/20 selection:text-white antialiased overflow-x-hidden">
+    <!-- Persistent player element: the ONE audio sink for the whole app.
+         Kept in the document from first paint so iOS WebKit keeps the audio session
+         (AVAudioSessionCategoryPlayback) alive through screen lock, app switching and
+         Control Center / lock-screen controls. Never recreate or replace this node. -->
+    <audio
+      id="audioPlayer"
+      preload="auto"
+      playsinline
+      webkit-playsinline
+      x5-playsinline
+      x-webkit-airplay="allow"
+      style="position:fixed;bottom:0px;right:0px;width:1px;height:1px;opacity:0.001;pointer-events:none;z-index:-10;"
+    ></audio>
+    <!-- Embedded YouTube Iframe target container for YouTube releases -->
+    <div id="yt-player-target" style="position:fixed;bottom:0;right:0;width:2px;height:2px;opacity:0.001;pointer-events:none;z-index:-10;"></div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

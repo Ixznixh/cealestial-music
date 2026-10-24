@@ -1,0 +1,6 @@
+bun.lock
+.env
+.env.local
+.DS_Store
+dist
+.tmp-*
